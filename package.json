@@ -1,0 +1,102 @@
+{
+  "name": "mocodo-live",
+  "displayName": "Mocodo Live",
+  "description": "Live preview for Merise (Mocodo)",
+  "version": "1.0.0",
+  "publisher": "LouwiOw",
+  "license": "MIT",
+  "icon": "icon.png",
+  "engines": {
+    "vscode": "^1.96.0"
+  },
+  "categories": [
+    "Visualization",
+    "Education"
+  ],
+  "keywords": [
+    "mocodo",
+    "merise",
+    "mcd",
+    "diagram",
+    "modeling",
+    "database"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/LouwiOw/mocodo-live-preview.git"
+  },
+  "bugs": {
+    "url": "https://github.com/LouwiOw/mocodo-live-preview/issues"
+  },
+  "homepage": "https://github.com/LouwiOw/mocodo-live-preview/blob/main/README.md",
+  "main": "./dist/extension.js",
+  "activationEvents": [
+    "onLanguage:mocodo"
+  ],
+  "contributes": {
+    "languages": [
+      {
+        "id": "mocodo",
+        "aliases": [
+          "Mocodo",
+          "mocodo"
+        ],
+        "extensions": [
+          ".mcd"
+        ],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "mocodo",
+        "scopeName": "source.mocodo",
+        "path": "./syntaxes/mocodo.tmLanguage.json"
+      }
+    ],
+    "commands": [
+      {
+        "command": "mocodo-live.preview",
+        "title": "Mocodo: Open Preview",
+        "icon": "$(preview)"
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "mocodo-live.preview",
+        "key": "alt+m",
+        "when": "editorLangId == mocodo"
+      }
+    ],
+    "menus": {
+      "editor/title": [
+        {
+          "command": "mocodo-live.preview",
+          "when": "resourceExtname == .mcd",
+          "group": "navigation"
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run package",
+    "compile": "npm run check-types && node esbuild.js",
+    "watch": "npm run check-types && node esbuild.js --watch",
+    "package": "npm run check-types && node esbuild.js --minify",
+    "check-types": "tsc --noEmit",
+    "lint": "eslint",
+    "test": "vscode-test"
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.96.0",
+    "@types/node": "20.x",
+    "@typescript-eslint/eslint-plugin": "^8.17.0",
+    "@typescript-eslint/parser": "^8.17.0",
+    "eslint": "^9.16.0",
+    "esbuild": "^0.24.0",
+    "npm-run-all": "^4.1.5",
+    "typescript": "^5.7.2",
+    "@vscode/test-cli": "^0.0.10",
+    "@vscode/test-electron": "^2.4.1"
+  }
+}

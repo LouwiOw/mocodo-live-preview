@@ -1,0 +1,12 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "Mocodo",
+  "patterns": [
+    { "name": "keyword.control.mocodo", "match": "^\\s*/\\\\.*" },
+    { "name": "entity.name.tag.mocodo", "match": "^[^:,\\n]+(?=:)" },
+    { "name": "variable.parameter.mocodo", "match": "(?<=:|,)\\s*[^,\\n]+" },
+    { "name": "constant.numeric.mocodo", "match": "\\b[01][1Nn]\\b" },
+    { "name": "entity.name.function.mocodo", "match": "^[^:,\\n]+(?=,)" }
+  ],
+  "scopeName": "source.mocodo"
+}
