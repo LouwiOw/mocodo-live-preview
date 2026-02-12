@@ -7,3 +7,4 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 ## [Unreleased]
 
 - Initial release
+- NEW !!! I fixed the problem about the copy button, the UI is now more user-friendly and the copy button works perfectly :) Contact me if you have any suggestions ;)

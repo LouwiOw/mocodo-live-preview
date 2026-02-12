@@ -2,7 +2,7 @@
   "name": "mocodo-live",
   "displayName": "Mocodo Live",
   "description": "Live preview for Merise (Mocodo)",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "publisher": "Louwi",
   "license": "MIT",
   "icon": "icon.png",
