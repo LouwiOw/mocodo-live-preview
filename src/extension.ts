@@ -9,9 +9,9 @@ const CUSTOM_THEMES: any = {
         "name": "Looping (Doux)",
         "colors": {
             "background_color": "white",
-            "entity_color": "#ffffcc",              // Jaune Pâle
+            "entity_color": "#ffffcc",
             "entity_cartouche_color": "#ffffcc",
-            "association_color": "#99ccff",         // Bleu Ciel
+            "association_color": "#99ccff",
             "association_cartouche_color": "#99ccff",
             "entity_stroke_color": "black",
             "entity_cartouche_text_color": "black",
@@ -43,9 +43,9 @@ const CUSTOM_THEMES: any = {
         "name": "Looping (Flashy)",
         "colors": {
             "background_color": "white",
-            "entity_color": "#ffeb3b",              // JAUNE POUSSIN FLASHY
+            "entity_color": "#ffeb3b",
             "entity_cartouche_color": "#ffeb3b",
-            "association_color": "#00b0ff",         // BLEU ELECTRIQUE
+            "association_color": "#00b0ff",
             "association_cartouche_color": "#00b0ff",
             "entity_stroke_color": "black",
             "entity_cartouche_text_color": "black",
@@ -84,12 +84,21 @@ const NATIVE_THEMES = [
     { id: 'virid', name: 'Virid (Vert)' }
 ];
 
+// Interface pour les labels manuels
+interface ManualLabel {
+    id: number;
+    text: string;
+    x: number;
+    y: number;
+}
+
 export function activate(context: vscode.ExtensionContext) {
     let panel: vscode.WebviewPanel | undefined = undefined;
     let timeout: NodeJS.Timeout | undefined = undefined;
     
-    // On stocke le thème actuel ici (par défaut : looping_soft)
+    // État global de l'extension
     let currentTheme = "looping_soft";
+    let manualLabels: ManualLabel[] = []; // Stockage des labels ajoutés à la main
 
     const previewCommand = vscode.commands.registerCommand('mocodo-live.preview', () => {
         if (panel) {
@@ -99,12 +108,58 @@ export function activate(context: vscode.ExtensionContext) {
                 'mocodoPreview', 'Mocodo Preview', vscode.ViewColumn.Beside, { enableScripts: true }
             );
             
-            // Écouter les messages venant de la WebView (Changement de thème)
+            // Écouter les messages venant de la WebView
+            // Note: async est important pour attendre la réponse de l'utilisateur (InputBox)
             panel.webview.onDidReceiveMessage(
-                message => {
-                    if (message.command === 'changeTheme') {
-                        currentTheme = message.theme;
-                        triggerUpdate(panel); // On relance le rendu immédiatement
+                async message => {
+                    switch (message.command) {
+                        case 'changeTheme':
+                            currentTheme = message.theme;
+                            triggerUpdate(panel);
+                            break;
+                            
+                        case 'updateLabels':
+                            // Sauvegarde silencieuse de l'état (position drag & drop)
+                            manualLabels = message.labels; 
+                            break;
+
+                        // --- GESTION DES INTERFACES VS CODE (remplace prompt/alert) ---
+                        
+                        case 'requestAddLabel':
+                            const newText = await vscode.window.showInputBox({
+                                title: "Ajouter un rôle manuel",
+                                prompt: "Entrez le texte à afficher (ex: [parrain])",
+                                value: "[parrain]"
+                            });
+                            if (newText) {
+                                // On renvoie le texte validé à la WebView
+                                panel?.webview.postMessage({ command: 'finalizeAddLabel', text: newText });
+                            }
+                            break;
+
+                        case 'requestEditLabel':
+                            const editedText = await vscode.window.showInputBox({
+                                title: "Modifier le libellé",
+                                prompt: "Modifiez le texte (laissez vide pour supprimer)",
+                                value: message.currentText
+                            });
+                            // On renvoie le résultat (même si vide ou null)
+                            panel?.webview.postMessage({ 
+                                command: 'finalizeEditLabel', 
+                                id: message.id, 
+                                text: editedText 
+                            });
+                            break;
+
+                        case 'requestClearLabels':
+                            const answer = await vscode.window.showInformationMessage(
+                                "Voulez-vous supprimer tous les ajouts manuels ?", 
+                                "Oui", "Non"
+                            );
+                            if (answer === "Oui") {
+                                panel?.webview.postMessage({ command: 'finalizeClearLabels' });
+                            }
+                            break;
                     }
                 },
                 undefined,
@@ -118,7 +173,11 @@ export function activate(context: vscode.ExtensionContext) {
 
     function triggerUpdate(p: vscode.WebviewPanel | undefined) {
         if (timeout) clearTimeout(timeout);
-        timeout = setTimeout(() => { if (p) updatePreview(p, currentTheme); }, 500);
+        timeout = setTimeout(() => { 
+            if (p) {
+                updatePreview(p, currentTheme, manualLabels); 
+            }
+        }, 500);
     }
 
     vscode.workspace.onDidChangeTextDocument(e => {
@@ -136,7 +195,7 @@ export function activate(context: vscode.ExtensionContext) {
     context.subscriptions.push(previewCommand);
 }
 
-function updatePreview(panel: vscode.WebviewPanel, themeId: string) {
+function updatePreview(panel: vscode.WebviewPanel, themeId: string, manualLabels: ManualLabel[]) {
     const editor = vscode.window.activeTextEditor;
     if (!editor || editor.document.languageId !== 'mocodo') return;
 
@@ -149,7 +208,7 @@ function updatePreview(panel: vscode.WebviewPanel, themeId: string) {
     try {
         fs.writeFileSync(tempMcd, text);
     } catch (e) {
-        vscode.window.showErrorMessage("Erreur d'écriture : " + e);
+        vscode.window.showErrorMessage("Erreur d'écriture fichier temporaire : " + e);
         return;
     }
 
@@ -157,16 +216,14 @@ function updatePreview(panel: vscode.WebviewPanel, themeId: string) {
 
     // Logique de sélection du thème
     if (CUSTOM_THEMES[themeId]) {
-        // C'est un thème custom (JSON)
         try {
             fs.writeFileSync(tempTheme, JSON.stringify(CUSTOM_THEMES[themeId].colors));
-            command = `python -m mocodo --input "${tempMcd}" --colors "${tempTheme}"`;
+            command = `python -m mocodo --input "${tempMcd}" --colors "${tempTheme}" --encodings utf8`;
         } catch (e) {
             console.error(e);
         }
     } else {
-        // C'est un thème natif Mocodo (string simple)
-        command = `python -m mocodo --input "${tempMcd}" --colors ${themeId}`;
+        command = `python -m mocodo --input "${tempMcd}" --colors ${themeId} --encodings utf8`;
     }
 
     exec(command, { cwd: tempDir }, (err, stdout, stderr) => {
@@ -174,33 +231,27 @@ function updatePreview(panel: vscode.WebviewPanel, themeId: string) {
             panel.webview.html = `
                 <div style="font-family: sans-serif; padding: 20px;">
                     <h3 style="color:red">Erreur Mocodo</h3>
-                    <pre style="background: #f0f0f0; padding: 10px; color: #d32f2f;">${stderr || err.message}</pre>
+                    <pre style="background: #f0f0f0; padding: 10px; color: #d32f2f; white-space: pre-wrap;">${stderr || err.message}</pre>
                 </div>`;
             return;
         }
 
         if (fs.existsSync(tempSvg)) {
             const svgContent = fs.readFileSync(tempSvg, 'utf8');
-            panel.webview.html = getWebViewContent(svgContent, themeId);
+            panel.webview.html = getWebViewContent(svgContent, themeId, manualLabels);
         }
     });
 }
 
-function getWebViewContent(svg: string, currentTheme: string) {
+function getWebViewContent(svg: string, currentTheme: string, manualLabels: ManualLabel[]) {
     
     // Génération des options du menu déroulant
     let optionsHtml = "";
-    
-    // 1. Ajouter les thèmes custom
     for (const [key, value] of Object.entries(CUSTOM_THEMES)) {
         const isSelected = key === currentTheme ? "selected" : "";
         optionsHtml += `<option value="${key}" ${isSelected}>${(value as any).name}</option>`;
     }
-
-    // 2. Ajouter un séparateur
     optionsHtml += `<option disabled>──────────</option>`;
-
-    // 3. Ajouter les thèmes natifs
     NATIVE_THEMES.forEach(t => {
         const isSelected = t.id === currentTheme ? "selected" : "";
         optionsHtml += `<option value="${t.id}" ${isSelected}>${t.name}</option>`;
@@ -210,6 +261,10 @@ function getWebViewContent(svg: string, currentTheme: string) {
     const iconCopy = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>`;
     const iconCheck = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>`;
     const iconPalette = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19l7-7 3 3-7 7-3-3z"></path><path d="M18 13l-1.5-7.5L2 2l3.5 14.5L13 18l5-5z"></path><path d="M2 2l7.586 7.586"></path><circle cx="11" cy="11" r="2"></circle></svg>`;
+    const iconPlus = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>`;
+    const iconTrash = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>`;
+
+    const labelsJson = JSON.stringify(manualLabels);
 
     return `<!DOCTYPE html>
     <html lang="fr">
@@ -254,12 +309,15 @@ function getWebViewContent(svg: string, currentTheme: string) {
                 max-height: 90vh;
                 display: flex;
                 justify-content: center;
+                position: relative;
             }
 
             svg { 
                 max-width: 100%; 
                 height: auto; 
                 display: block;
+                /* Nécessaire pour les événements souris sur SVG */
+                pointer-events: visiblePainted; 
             }
             
             .controls {
@@ -297,7 +355,6 @@ function getWebViewContent(svg: string, currentTheme: string) {
                 transform: translateY(-1px);
                 box-shadow: 0 2px 5px rgba(0,0,0,0.2);
             }
-
             .icon-btn:active { transform: translateY(1px); }
 
             .copied { 
@@ -307,17 +364,41 @@ function getWebViewContent(svg: string, currentTheme: string) {
             }
 
             .select-wrapper { position: relative; overflow: hidden; }
-            
             #theme-select {
                 position: absolute;
                 top: 0; left: 0; width: 100%; height: 100%;
                 opacity: 0; cursor: pointer; appearance: none;
             }
+
+            /* Styles pour les textes déplaçables */
+            .draggable-text {
+                cursor: grab;
+                font-family: Arial, Helvetica, sans-serif;
+                font-size: 12px;
+                fill: black;
+                user-select: none;
+                filter: drop-shadow(0px 0px 2px rgba(255,255,255,0.8));
+                font-weight: 500;
+            }
+            .draggable-text:hover {
+                fill: #d32f2f;
+                font-weight: bold;
+                cursor: grab;
+            }
+            .draggable-text:active { cursor: grabbing; }
         </style>
     </head>
     <body>
         
         <div class="controls">
+            <button class="icon-btn" onclick="addLabel()" title="Ajouter un libellé manuellement">
+                ${iconPlus}
+            </button>
+            
+            <button class="icon-btn" onclick="clearLabels()" title="Effacer les libellés manuels">
+                ${iconTrash}
+            </button>
+
             <button id="copy-btn" class="icon-btn" onclick="copyImage()" title="Copier l'image">
                 <span id="icon-container">${iconCopy}</span>
             </button>
@@ -336,6 +417,157 @@ function getWebViewContent(svg: string, currentTheme: string) {
 
         <script>
             const vscode = acquireVsCodeApi();
+            
+            // --- ÉTAT LOCAL ---
+            let labels = ${labelsJson};
+            let draggedElement = null;
+            let offset = { x: 0, y: 0 };
+
+            // --- ÉCOUTE DES RÉPONSES DE L'EXTENSION (VS CODE) ---
+            window.addEventListener('message', event => {
+                const message = event.data;
+                switch (message.command) {
+                    case 'finalizeAddLabel':
+                        createLabel(message.text);
+                        break;
+                    case 'finalizeEditLabel':
+                        applyEditLabel(message.id, message.text);
+                        break;
+                    case 'finalizeClearLabels':
+                        performClearLabels();
+                        break;
+                }
+            });
+
+            window.onload = function() {
+                renderLabels();
+                initDragAndDrop();
+            };
+
+            function getSvg() {
+                return document.querySelector('#diagram-container svg');
+            }
+
+            function renderLabels() {
+                const svg = getSvg();
+                if (!svg) return;
+
+                svg.querySelectorAll('.draggable-text').forEach(e => e.remove());
+
+                labels.forEach(l => {
+                    const textNode = document.createElementNS("http://www.w3.org/2000/svg", "text");
+                    textNode.setAttribute("x", l.x);
+                    textNode.setAttribute("y", l.y);
+                    textNode.setAttribute("class", "draggable-text");
+                    textNode.setAttribute("data-id", l.id);
+                    textNode.textContent = l.text;
+                    
+                    // Double-clic pour éditer
+                    textNode.addEventListener('dblclick', (e) => {
+                        e.stopPropagation(); // Évite conflit avec drag
+                        requestEdit(l.id, l.text);
+                    });
+                    
+                    svg.appendChild(textNode);
+                });
+            }
+
+            // 1. AJOUT : Demande à VS Code -> Réponse via message
+            function addLabel() {
+                vscode.postMessage({ command: 'requestAddLabel' });
+            }
+
+            function createLabel(text) {
+                labels.push({
+                    id: Date.now(),
+                    text: text,
+                    x: 50, // Position par défaut
+                    y: 50
+                });
+                renderLabels();
+                saveLabels();
+            }
+
+            // 2. EDITION
+            function requestEdit(id, currentText) {
+                vscode.postMessage({ command: 'requestEditLabel', id: id, currentText: currentText });
+            }
+
+            function applyEditLabel(id, newText) {
+                if (newText === undefined) return; // Annulé
+
+                if (newText === "") {
+                    // Si vide, on supprime
+                    labels = labels.filter(l => l.id !== id);
+                } else {
+                    const label = labels.find(l => l.id === id);
+                    if (label) label.text = newText;
+                }
+                renderLabels();
+                saveLabels();
+            }
+
+            // 3. EFFACER TOUT
+            function clearLabels() {
+                if(labels.length > 0) {
+                    vscode.postMessage({ command: 'requestClearLabels' });
+                }
+            }
+
+            function performClearLabels() {
+                labels = [];
+                renderLabels();
+                saveLabels();
+            }
+
+            function saveLabels() {
+                vscode.postMessage({ command: 'updateLabels', labels: labels });
+            }
+
+            // --- DRAG & DROP LOGIQUE ---
+            function initDragAndDrop() {
+                const svg = getSvg();
+                if(!svg) return;
+                svg.addEventListener('mousedown', startDrag);
+                svg.addEventListener('mousemove', drag);
+                svg.addEventListener('mouseup', endDrag);
+                svg.addEventListener('mouseleave', endDrag);
+            }
+
+            function startDrag(evt) {
+                if (evt.target.classList.contains('draggable-text')) {
+                    draggedElement = evt.target;
+                    const svg = getSvg();
+                    const CTM = svg.getScreenCTM();
+                    offset.x = (evt.clientX - CTM.e) / CTM.a - parseFloat(draggedElement.getAttribute('x'));
+                    offset.y = (evt.clientY - CTM.f) / CTM.d - parseFloat(draggedElement.getAttribute('y'));
+                }
+            }
+
+            function drag(evt) {
+                if (draggedElement) {
+                    evt.preventDefault();
+                    const svg = getSvg();
+                    const CTM = svg.getScreenCTM();
+                    const x = (evt.clientX - CTM.e) / CTM.a - offset.x;
+                    const y = (evt.clientY - CTM.f) / CTM.d - offset.y;
+                    draggedElement.setAttribute('x', x);
+                    draggedElement.setAttribute('y', y);
+                }
+            }
+
+            function endDrag(evt) {
+                if (draggedElement) {
+                    const id = parseInt(draggedElement.getAttribute('data-id'));
+                    const label = labels.find(l => l.id === id);
+                    if (label) {
+                        label.x = parseFloat(draggedElement.getAttribute('x'));
+                        label.y = parseFloat(draggedElement.getAttribute('y'));
+                        saveLabels();
+                    }
+                    draggedElement = null;
+                }
+            }
 
             function changeTheme() {
                 const selector = document.getElementById('theme-select');
@@ -343,16 +575,11 @@ function getWebViewContent(svg: string, currentTheme: string) {
             }
 
             function copyImage() {
-                // CORRECTION ICI : On cible le SVG DANS le conteneur du diagramme
-                const svgElement = document.querySelector('#diagram-container svg');
-                
+                const svgElement = getSvg();
                 const btn = document.getElementById('copy-btn');
                 const iconContainer = document.getElementById('icon-container');
                 
-                if (!svgElement) {
-                    console.error("Aucun SVG trouvé dans le conteneur");
-                    return;
-                }
+                if (!svgElement) return;
 
                 const serializer = new XMLSerializer();
                 let source = serializer.serializeToString(svgElement);
@@ -373,27 +600,20 @@ function getWebViewContent(svg: string, currentTheme: string) {
                     canvas.height = bbox.height * scale;
                     const ctx = canvas.getContext("2d");
                     ctx.scale(scale, scale);
-                    
                     ctx.fillStyle = "white";
                     ctx.fillRect(0, 0, bbox.width, bbox.height);
-                    
                     ctx.drawImage(img, 0, 0, bbox.width, bbox.height);
 
                     canvas.toBlob(function(blob) {
-                        try {
-                            const item = new ClipboardItem({ "image/png": blob });
-                            navigator.clipboard.write([item]).then(function() {
-                                btn.classList.add('copied');
-                                iconContainer.innerHTML = '${iconCheck}';
-                                setTimeout(() => {
-                                    btn.classList.remove('copied');
-                                    iconContainer.innerHTML = '${iconCopy}';
-                                }, 2000);
-                            });
-                        } catch (err) {
-                            console.error("Erreur copie : " + err);
-                            alert("Erreur lors de la copie.");
-                        }
+                        const item = new ClipboardItem({ "image/png": blob });
+                        navigator.clipboard.write([item]).then(function() {
+                            btn.classList.add('copied');
+                            iconContainer.innerHTML = '${iconCheck}';
+                            setTimeout(() => {
+                                btn.classList.remove('copied');
+                                iconContainer.innerHTML = '${iconCopy}';
+                            }, 2000);
+                        });
                     });
                     URL.revokeObjectURL(url);
                 };
